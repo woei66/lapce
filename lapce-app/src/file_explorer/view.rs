@@ -598,11 +598,29 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
         })
     };
 
-    // Every open child of both panes, as a single flat list.
+    // Every open file as a single flat list. A file that is open in both panes
+    // must only be listed once.
     let items = move || {
         let mut items = Vec::new();
+        let mut seen: Vec<PathBuf> = Vec::new();
         for (editor_tab_id, editor_tab) in editor_tabs.get() {
             for (child_index, _, child) in editor_tab.get().children {
+                if let EditorTabChild::Editor(editor_id) = &child {
+                    let path = editors.editor_untracked(*editor_id).and_then(
+                        |editor| {
+                            editor
+                                .doc()
+                                .content
+                                .with_untracked(|content| content.path().cloned())
+                        },
+                    );
+                    if let Some(path) = path {
+                        if seen.contains(&path) {
+                            continue;
+                        }
+                        seen.push(path);
+                    }
+                }
                 items.push((editor_tab_id, editor_tab, child_index, child));
             }
         }

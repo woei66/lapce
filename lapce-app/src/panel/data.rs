@@ -20,6 +20,11 @@ use crate::{
 
 pub type PanelOrder = im::HashMap<PanelPosition, im::Vector<PanelKind>>;
 
+/// Default width of the left (file explorer / open editors) panel as a fraction
+/// of the window width. 9.13% of a 1920px window is ~175px, which matches the
+/// layout that was previously in use.
+pub const DEFAULT_PANEL_LEFT_FRACTION: f64 = 0.0913;
+
 pub fn default_panel_order() -> PanelOrder {
     let mut order = PanelOrder::new();
     order.insert(
@@ -99,6 +104,7 @@ impl PanelData {
         panels: im::HashMap<PanelPosition, im::Vector<PanelKind>>,
         available_size: Memo<Size>,
         sections: im::HashMap<PanelSection, bool>,
+        window_width: f64,
         common: Rc<CommonData>,
     ) -> Self {
         let panels = cx.create_rw_signal(panels);
@@ -154,8 +160,11 @@ impl PanelData {
             },
         );
         let styles = cx.create_rw_signal(styles);
+        // Size the panel from the window width so the default layout keeps the
+        // same proportions as the previous session.
+        let left = (window_width * DEFAULT_PANEL_LEFT_FRACTION).max(120.0);
         let size = cx.create_rw_signal(PanelSize {
-            left: 250.0,
+            left,
             left_split: 0.5,
             bottom: 300.0,
             bottom_split: 0.5,

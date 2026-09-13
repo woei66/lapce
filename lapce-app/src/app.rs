@@ -1651,7 +1651,17 @@ fn editor_tab(
             .with_untracked(|editor_tab| editor_tab.scope)
             .dispose();
     })
-    .style(|s| s.flex_col().size_full())
+    .style(move |s| {
+        // Frame the active pane in red so it is obvious which side is being
+        // edited. The inactive pane gets a transparent border of the same width
+        // so the layout does not shift.
+        let active = active_editor_tab.get() == Some(editor_tab_id);
+        s.flex_col().size_full().border(2.0).border_color(if active {
+            Color::from_rgb8(0xE0, 0x2F, 0x2F)
+        } else {
+            Color::from_rgba8(0, 0, 0, 0)
+        })
+    })
     .debug_name("Editor Tab (Content + Header)")
 }
 

@@ -480,11 +480,15 @@ impl WindowTabData {
                 let panel_order = db
                     .get_panel_orders()
                     .unwrap_or_else(|_| default_panel_order());
+                // Keep the default panel proportion relative to the window.
+                let window_width =
+                    db.get_window().map(|info| info.size.width).unwrap_or(1920.0);
                 PanelData::new(
                     cx,
                     panel_order,
                     panel_available_size,
                     im::HashMap::new(),
+                    window_width,
                     common.clone(),
                 )
             });
