@@ -209,10 +209,15 @@ command = "new_file"
 
 # ----------------------------------- Editor Management -------------------------------
 
+# Editing is always split into a left and a right pane, so ctrl+w / alt+w close
+# the whole application instead of a single editor tab.
 [[keymaps]]
 key = "ctrl+w"
-command = "split_close"
-mode = "i"
+command = "close_window"
+
+[[keymaps]]
+key = "alt+w"
+command = "close_window"
 
 [[keymaps]]
 key = "ctrl+k f"

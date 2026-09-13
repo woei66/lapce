@@ -677,46 +677,6 @@ command = "toggle_blockwise_visual_mode"
 mode = "nv"
 
 [[keymaps]]
-key = "ctrl+w l"
-command = "split_right"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w h"
-command = "split_left"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w j"
-command = "split_down"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w k"
-command = "split_up"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w s"
-command = "split_horizontal"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w v"
-command = "split_vertical"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w c"
-command = "split_close"
-mode = "n"
-
-[[keymaps]]
-key = "ctrl+w x"
-command = "split_exchange"
-mode = "n"
-
-[[keymaps]]
 key = "space"
 command = "toggle_code_glance"
 mode = "nv"

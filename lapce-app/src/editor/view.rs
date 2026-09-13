@@ -2093,10 +2093,15 @@ fn editor_content(
         let editor_content_view =
             editor_view(e_data.get_untracked(), debug_breakline, is_active).style(
                 move |s| {
+                    let config = config.get();
                     s.absolute()
                         .margin_left(1.0)
                         .min_size_full()
                         .cursor(CursorStyle::Text)
+                        // The editor area keeps its own colors so the rest of
+                        // the UI can use the theme's panel/light colors.
+                        .color(config.color(LapceColor::EDITOR_FOREGROUND))
+                        .background(config.color(LapceColor::EDITOR_BACKGROUND))
                 },
             );
 

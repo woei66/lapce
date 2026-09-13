@@ -489,7 +489,10 @@ impl Doc {
     }
 
     pub fn handle_file_changed(&self, content: Rope) {
-        if self.is_pristine() {
+        // Always refresh from disk so externally modified files show their new
+        // content, even when the buffer has unsaved edits. `reload` applies the
+        // change as a normal delta, so the previous state can still be undone.
+        if self.buffer.with_untracked(|b| b.to_string()) != content.to_string() {
             self.reload(content, true);
         }
     }

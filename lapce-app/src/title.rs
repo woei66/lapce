@@ -272,7 +272,7 @@ fn middle(
                 .border(1.0)
                 .border_color(config.color(LapceColor::LAPCE_BORDER))
                 .border_radius(6.0)
-                .background(config.color(LapceColor::EDITOR_BACKGROUND))
+                .background(config.color(LapceColor::PANEL_HEADER_BACKGROUND))
         }),
         stack((
             clickable_icon(

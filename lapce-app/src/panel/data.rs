@@ -124,7 +124,8 @@ impl PanelData {
             PanelPosition::BottomLeft,
             PanelStyle {
                 active: 0,
-                shown: true,
+                // The bottom terminal panel is not opened by default.
+                shown: false,
                 maximized: false,
             },
         );

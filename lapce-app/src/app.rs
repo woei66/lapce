@@ -502,6 +502,8 @@ impl AppData {
         let window_scale = window_data.window_scale;
         let app_command = window_data.app_command;
         let config = window_data.config;
+        // Ensures the window is maximized only once, the first time it is shown.
+        let maximize_once = create_rw_signal(false);
         // The KeyDown and PointerDown event handlers both need ownership of a WindowData object.
         let key_down_window_data = window_data.clone();
         let view = stack((
@@ -647,6 +649,13 @@ impl AppData {
                 }
             })
             .on_event_stop(EventListener::WindowGotFocus, move |_| {
+                if !maximize_once.get_untracked() {
+                    maximize_once.set(true);
+                    // Open the window maximized. Done on first focus so the
+                    // window already exists and the request is honored by the
+                    // window manager.
+                    floem::action::set_window_maximized(true);
+                }
                 app_command.send(AppCommand::WindowGotFocus(window_id));
             })
             .on_event_stop(EventListener::WindowClosed, move |_| {
@@ -759,14 +768,9 @@ fn editor_tab_header(
 
             let tab_content = tooltip(
                 label(move || info.with(|info| info.name.clone())).style(move |s| {
-                    s.apply_if(
-                        !info
-                            .with(|info| info.confirmed)
-                            .map(|confirmed| confirmed.get())
-                            .unwrap_or(true),
-                        |s| s.font_style(FontStyle::Italic),
-                    )
-                    .selectable(false)
+                    // Explicit font so CJK file names render (see Open Editors).
+                    s.font_family(config.get().editor.font_family.clone())
+                        .selectable(false)
                 }),
                 move || {
                     tooltip_tip(
@@ -1452,7 +1456,19 @@ fn editor_tab(
     let internal_command = main_split.common.internal_command;
     let tab_size = create_rw_signal(Size::ZERO);
     let drag_over: RwSignal<Option<DragOverPosition>> = create_rw_signal(None);
+    // Thin bar marking which pane is active: red for the active pane, gray for
+    // the inactive one.
+    let active_bar = empty().style(move |s| {
+        s.width_full()
+            .height(3.0)
+            .background(if active_editor_tab.get() == Some(editor_tab_id) {
+                Color::from_rgb8(0xE0, 0x2F, 0x2F)
+            } else {
+                Color::from_rgb8(0x44, 0x44, 0x44)
+            })
+    });
     stack((
+        active_bar,
         editor_tab_header(
             window_tab_data.clone(),
             active_editor_tab,
@@ -2631,7 +2647,7 @@ fn palette_input(window_tab_data: Rc<WindowTabData>) -> impl View {
             .items_center()
             .border_bottom(1.0)
             .border_color(config.color(LapceColor::LAPCE_BORDER))
-            .background(config.color(LapceColor::EDITOR_BACKGROUND))
+            .background(config.color(LapceColor::PANEL_HEADER_BACKGROUND))
     }))
     .style(|s| s.padding_bottom(5.0))
 }
@@ -3286,7 +3302,7 @@ fn rename(window_tab_data: Rc<WindowTabData>) -> impl View {
                 .border(1.0)
                 .border_radius(6.0)
                 .border_color(config.color(LapceColor::LAPCE_BORDER))
-                .background(config.color(LapceColor::EDITOR_BACKGROUND))
+                .background(config.color(LapceColor::PANEL_HEADER_BACKGROUND))
         }),
     )
     .on_resize(move |rect| {
@@ -3356,8 +3372,8 @@ fn window_tab(window_tab_data: Rc<WindowTabData>) -> impl View {
     .style(move |s| {
         let config = config.get();
         s.size_full()
-            .color(config.color(LapceColor::EDITOR_FOREGROUND))
-            .background(config.color(LapceColor::EDITOR_BACKGROUND))
+            .color(config.color(LapceColor::PANEL_FOREGROUND))
+            .background(config.color(LapceColor::PANEL_BACKGROUND))
             .font_size(config.ui.font_size() as f32)
             .apply_if(!config.ui.font_family.is_empty(), |s| {
                 s.font_family(config.ui.font_family.clone())
@@ -3540,7 +3556,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                     .border_color(config.color(LapceColor::LAPCE_BORDER))
                     .color(
                         config
-                            .color(LapceColor::EDITOR_FOREGROUND)
+                            .color(LapceColor::PANEL_FOREGROUND)
                             .multiply_alpha(0.7),
                     )
                     .background(
@@ -3657,7 +3673,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                 s.font_family(config.ui.font_family.clone())
             })
             .apply_if(tabs.with(|tabs| tabs.len() < 2), |s| s.hide())
-            .color(config.color(LapceColor::EDITOR_FOREGROUND))
+            .color(config.color(LapceColor::PANEL_FOREGROUND))
             .border_color(config.color(LapceColor::LAPCE_BORDER))
             .background(config.color(LapceColor::PANEL_BACKGROUND))
             .items_center()

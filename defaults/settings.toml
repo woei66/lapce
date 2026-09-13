@@ -2,15 +2,15 @@
 
 [core]
 modal = false
-color-theme = "Lapce Dark"
+color-theme = "Lapce Light"
 icon-theme = "Lapce Codicons"
 custom-titlebar = true
 file-explorer-double-click = false
 auto-reload-plugin = false
 
 [editor]
-font-family = "monospace"
-font-size = 13
+font-family = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
+font-size = 20
 code-glance-font-size = 2
 line-height = 1.5
 smart-tab = true
@@ -87,7 +87,7 @@ default = {}
 
 [ui]
 scale = +1.0
-font-family = ""
+font-family = 'Noto Sans CJK TC, Noto Sans CJK SC, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif'
 font-size = 13
 icon-size = 0
 header-height = 36

@@ -776,7 +776,7 @@ pub fn checkbox(
     svg(svg_str).style(move |s| {
         let config = config.get();
         let size = config.ui.font_size() as f32;
-        let color = config.color(LapceColor::EDITOR_FOREGROUND);
+        let color = config.color(LapceColor::PANEL_FOREGROUND);
 
         s.min_width(size)
             .size(size, size)

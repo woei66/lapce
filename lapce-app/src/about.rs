@@ -103,12 +103,12 @@ pub fn about_popup(window_tab_data: Rc<WindowTabData>) -> impl View {
         stack((
             svg(move || (config.get()).logo_svg()).style(move |s| {
                 s.size(logo_size, logo_size)
-                    .color(config.get().color(LapceColor::EDITOR_FOREGROUND))
+                    .color(config.get().color(LapceColor::PANEL_FOREGROUND))
             }),
             label(|| "Lapce".to_string()).style(move |s| {
                 s.font_bold()
                     .margin_top(10.0)
-                    .color(config.get().color(LapceColor::EDITOR_FOREGROUND))
+                    .color(config.get().color(LapceColor::PANEL_FOREGROUND))
             }),
             label(|| format!("Version: {}", VERSION)).style(move |s| {
                 s.margin_top(10.0)

@@ -422,6 +422,11 @@ impl WindowTabData {
             });
         }
 
+        // Fresh workspaces start with the editor split into a left and a right
+        // pane, so a different file can be opened in each half. This is a no-op
+        // when a saved layout with editor tabs was restored.
+        main_split.init_two_pane_layout();
+
         let palette = PaletteData::new(
             cx,
             workspace.clone(),

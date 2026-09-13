@@ -16,7 +16,8 @@ use floem::{
 use itertools::Itertools;
 use lapce_core::{
     buffer::rope_text::RopeText, command::FocusCommand, cursor::Cursor,
-    rope_text_pos::RopeTextPosition, selection::Selection, syntax::Syntax,
+    directory::Directory, rope_text_pos::RopeTextPosition, selection::Selection,
+    syntax::Syntax,
 };
 use lapce_rpc::{
     buffer::BufferId,
@@ -68,6 +69,16 @@ pub enum SplitMoveDirection {
     Right,
     Left,
 }
+
+/// Which of the two editor panes an action applies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplitSide {
+    Left,
+    Right,
+}
+
+/// How many recently opened files are remembered.
+const RECENT_FILES_LIMIT: usize = 10;
 
 impl SplitMoveDirection {
     pub fn direction(&self) -> SplitDirection {
@@ -392,6 +403,10 @@ pub struct MainSplitData {
     pub scope: Scope,
     pub root_split: SplitId,
     pub active_editor_tab: RwSignal<Option<EditorTabId>>,
+    /// Which pane the opened files list loads files into.
+    pub file_list_target: RwSignal<SplitSide>,
+    /// The most recently opened files, persisted across sessions.
+    pub recent_files: RwSignal<Vec<PathBuf>>,
     pub splits: RwSignal<im::HashMap<SplitId, RwSignal<SplitData>>>,
     pub editor_tabs: RwSignal<im::HashMap<EditorTabId, RwSignal<EditorTabData>>>,
     pub editors: Editors,
@@ -477,11 +492,16 @@ impl MainSplitData {
             });
         }
 
-        Self {
+        let file_list_target = cx.create_rw_signal(SplitSide::Left);
+        let recent_files = cx.create_rw_signal(load_recent_files());
+
+        let data = Self {
             scope: cx,
             root_split: SplitId::next(),
             splits,
             active_editor_tab,
+            file_list_target,
+            recent_files,
             editor_tabs,
             editors,
             diff_editors,
@@ -498,7 +518,26 @@ impl MainSplitData {
             common,
             references,
             implementations,
+        };
+
+        // The file list belongs to whichever pane is currently active, so keep
+        // the left/right target in sync with the active editor pane.
+        {
+            let data = data.clone();
+            cx.create_effect(move |_| {
+                let Some(active) = data.active_editor_tab.get() else {
+                    return;
+                };
+                let Some(side) = data.side_of_tab(active) else {
+                    return;
+                };
+                if data.file_list_target.get_untracked() != side {
+                    data.file_list_target.set(side);
+                }
+            });
         }
+
+        data
     }
 
     pub fn key_down<'a>(
@@ -771,6 +810,10 @@ impl MainSplitData {
         ignore_unconfirmed: bool,
         same_editor_tab: bool,
     ) -> EditorTabChild {
+        if let EditorTabChildSource::Editor { path, .. } = &source {
+            self.record_recent_file(path.clone());
+        }
+
         let config = self.common.config.get_untracked();
 
         let active_editor_tab_id = self.active_editor_tab.get_untracked();
@@ -1937,6 +1980,203 @@ impl MainSplitData {
         Some(())
     }
 
+    /// Set up the default layout for a freshly opened workspace: two editor
+    /// panes side by side, each holding its own file, so that a different file
+    /// can be opened in the left and the right half.
+    ///
+    /// A layout that is already split is left untouched. A restored single pane
+    /// keeps its open files and simply gains a second pane next to it.
+    pub fn init_two_pane_layout(&self) {
+        enum LeftPane {
+            EditorTab(EditorTabId),
+            Split,
+            Empty,
+        }
+
+        let Some(root_split) = self
+            .splits
+            .with_untracked(|splits| splits.get(&self.root_split).cloned())
+        else {
+            return;
+        };
+
+        let left_pane =
+            root_split.with_untracked(|split| match split.children.first() {
+                Some((_, SplitContent::EditorTab(editor_tab_id))) => {
+                    LeftPane::EditorTab(*editor_tab_id)
+                }
+                // Already a nested split, so there are panes; leave it alone.
+                Some((_, SplitContent::Split(_))) => LeftPane::Split,
+                None => LeftPane::Empty,
+            });
+
+        let left_tab_id = match left_pane {
+            LeftPane::EditorTab(editor_tab_id) => editor_tab_id,
+            LeftPane::Split => return,
+            LeftPane::Empty => {
+                // Fresh workspace: create the first editor tab with an empty
+                // file.
+                self.get_editor_tab_child(
+                    EditorTabChildSource::NewFileEditor,
+                    true,
+                    true,
+                );
+                let Some(editor_tab_id) = self.active_editor_tab.get_untracked()
+                else {
+                    return;
+                };
+                editor_tab_id
+            }
+        };
+
+        // Right pane: an independent editor tab with its own empty file.
+        // Creating it directly (instead of using `split`) keeps the two halves
+        // from sharing the same document.
+        let right_tab_id = EditorTabId::next();
+        self.new_editor_tab(right_tab_id, self.root_split);
+        let previous_active = self.active_editor_tab.get_untracked();
+        self.active_editor_tab.set(Some(right_tab_id));
+        self.get_editor_tab_child(EditorTabChildSource::NewFileEditor, true, true);
+
+        // Lay the panes out next to each other. `Vertical` is a row, which is
+        // what puts them on the left and the right.
+        root_split.update(|split| {
+            let left_size = split
+                .children
+                .first()
+                .map(|(size, _)| *size)
+                .unwrap_or_else(|| split.scope.create_rw_signal(1.0));
+            split.direction = SplitDirection::Vertical;
+            split.children = vec![
+                (left_size, SplitContent::EditorTab(left_tab_id)),
+                (
+                    split.scope.create_rw_signal(1.0),
+                    SplitContent::EditorTab(right_tab_id),
+                ),
+            ];
+        });
+
+        // Keep the previously focused pane active (the left one for a fresh
+        // workspace), so files passed on the command line open there.
+        self.active_editor_tab
+            .set(previous_active.or(Some(left_tab_id)));
+    }
+
+    /// The editor pane shown on the given side of the two pane layout.
+    pub fn side_tab_id(&self, side: SplitSide) -> Option<EditorTabId> {
+        let index = match side {
+            SplitSide::Left => 0,
+            SplitSide::Right => 1,
+        };
+        self.splits.with_untracked(|splits| {
+            splits.get(&self.root_split).and_then(|split| {
+                split.with_untracked(|split| {
+                    split.children.get(index).and_then(|(_, content)| {
+                        match content {
+                            SplitContent::EditorTab(editor_tab_id) => {
+                                Some(*editor_tab_id)
+                            }
+                            SplitContent::Split(_) => None,
+                        }
+                    })
+                })
+            })
+        })
+    }
+
+    /// Whether the editor tab is one of the permanent left/right panes.
+    pub fn is_root_pane(&self, editor_tab_id: EditorTabId) -> bool {
+        self.splits.with_untracked(|splits| {
+            splits.get(&self.root_split).is_some_and(|split| {
+                split.with_untracked(|split| {
+                    split.children.iter().any(|(_, content)| {
+                        matches!(
+                            content,
+                            SplitContent::EditorTab(id) if *id == editor_tab_id
+                        )
+                    })
+                })
+            })
+        })
+    }
+
+    /// Handle a click on an entry of the opened files list: load the file into
+    /// the pane selected by the left/right toggle.
+    ///
+    /// Non-file children (scratch buffers, settings, ...) cannot be reopened,
+    /// so for those the pane they already live in is focused instead.
+    pub fn open_in_side(
+        &self,
+        side: SplitSide,
+        source_tab: EditorTabId,
+        source_tab_signal: RwSignal<EditorTabData>,
+        child_index: usize,
+        child: &EditorTabChild,
+    ) {
+        // Keep the source tab consistent even when we cannot retarget.
+        source_tab_signal.update(|editor_tab| {
+            editor_tab.active = child_index;
+        });
+
+        let path = match child {
+            EditorTabChild::Editor(editor_id) => {
+                self.editors.editor_untracked(*editor_id).and_then(|editor| {
+                    editor
+                        .doc()
+                        .content
+                        .with_untracked(|content| content.path().cloned())
+                })
+            }
+            _ => None,
+        };
+
+        let Some(path) = path else {
+            self.active_editor_tab.set(Some(source_tab));
+            return;
+        };
+
+        self.open_path_in_side(side, path);
+    }
+
+    /// Load a file into the given pane (also used by the recent files list).
+    pub fn open_path_in_side(&self, side: SplitSide, path: PathBuf) {
+        let Some(target_tab) = self.side_tab_id(side) else {
+            return;
+        };
+
+        // Point the active pane at the chosen side first, then open the file
+        // with `same_editor_tab` so it does not jump to the other pane.
+        self.active_editor_tab.set(Some(target_tab));
+        self.common
+            .internal_command
+            .send(InternalCommand::GoToLocation {
+                location: EditorLocation {
+                    path,
+                    position: None,
+                    scroll_offset: None,
+                    ignore_unconfirmed: true,
+                    same_editor_tab: true,
+                },
+            });
+    }
+
+    /// Which side of the two pane layout an editor tab belongs to.
+    pub fn side_of_tab(&self, editor_tab_id: EditorTabId) -> Option<SplitSide> {
+        [SplitSide::Left, SplitSide::Right]
+            .into_iter()
+            .find(|side| self.side_tab_id(*side) == Some(editor_tab_id))
+    }
+
+    /// Remember a file as one of the most recently opened ones.
+    pub fn record_recent_file(&self, path: PathBuf) {
+        self.recent_files.update(|files| {
+            files.retain(|p| p != &path);
+            files.insert(0, path);
+            files.truncate(RECENT_FILES_LIMIT);
+        });
+        save_recent_files(&self.recent_files.get_untracked());
+    }
+
     pub fn editor_tab_child_close_active(&self) -> Option<()> {
         let active_editor_tab = self.active_editor_tab.get_untracked()?;
         let editor_tab = self.editor_tabs.with_untracked(|editor_tabs| {
@@ -2156,7 +2396,9 @@ impl MainSplitData {
             EditorTabChild::Volt(_, _) => {}
         }
 
-        if editor_tab_children_len == 0 {
+        // The left and right panes are permanent: keep them (possibly empty)
+        // instead of collapsing the two pane layout.
+        if editor_tab_children_len == 0 && !self.is_root_pane(editor_tab_id) {
             self.editor_tab_remove(editor_tab_id);
         }
 
@@ -3102,4 +3344,33 @@ pub enum TabCloseKind {
     CloseOther,
     CloseToLeft,
     CloseToRight,
+}
+
+/// Path of the file that persists the most recently opened files.
+fn recent_files_path() -> Option<PathBuf> {
+    Directory::data_local_directory().map(|dir| dir.join("recent_files.json"))
+}
+
+fn load_recent_files() -> Vec<PathBuf> {
+    let Some(path) = recent_files_path() else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<PathBuf>>(&content).unwrap_or_default()
+}
+
+fn save_recent_files(files: &[PathBuf]) {
+    let Some(path) = recent_files_path() else {
+        return;
+    };
+    match serde_json::to_string(files) {
+        Ok(content) => {
+            if let Err(err) = std::fs::write(&path, content) {
+                tracing::warn!("failed to save recent files: {err:?}");
+            }
+        }
+        Err(err) => tracing::warn!("failed to serialize recent files: {err:?}"),
+    }
 }

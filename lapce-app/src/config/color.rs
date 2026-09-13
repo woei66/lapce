@@ -148,6 +148,8 @@ impl LapceColor {
     pub const PANEL_BACKGROUND: &'static str = "panel.background";
     pub const PANEL_FOREGROUND: &'static str = "panel.foreground";
     pub const PANEL_FOREGROUND_DIM: &'static str = "panel.foreground.dim";
+    pub const PANEL_HEADER_BACKGROUND: &'static str = "lapce.panel.header.background";
+    pub const PANEL_HEADER_FOREGROUND: &'static str = "lapce.panel.header.foreground";
     pub const PANEL_CURRENT_BACKGROUND: &'static str = "panel.current.background";
     pub const PANEL_CURRENT_FOREGROUND: &'static str = "panel.current.foreground";
     pub const PANEL_CURRENT_FOREGROUND_DIM: &'static str =

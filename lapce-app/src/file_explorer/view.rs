@@ -1,4 +1,8 @@
-use std::{path::Path, rc::Rc, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
 
 use floem::{
     View,
@@ -28,6 +32,7 @@ use crate::{
     command::InternalCommand,
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     editor_tab::{EditorTabChild, EditorTabData},
+    main_split::{MainSplitData, SplitSide},
     panel::{
         data::PanelSection, kind::PanelKind, position::PanelPosition,
         view::PanelBuilder,
@@ -70,7 +75,7 @@ pub fn file_explorer_panel(
     PanelBuilder::new(config, position)
         .add_height_style(
             "Open Editors",
-            150.0,
+            320.0,
             container(open_editors_view(window_tab_data.clone()))
                 .style(|s| s.size_full()),
             window_tab_data.panel.section_open(PanelSection::OpenEditor),
@@ -494,15 +499,19 @@ fn file_explorer_view(
 }
 
 fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
+    let main_split = window_tab_data.main_split.clone();
     let diff_editors = window_tab_data.main_split.diff_editors;
     let editors = window_tab_data.main_split.editors;
     let editor_tabs = window_tab_data.main_split.editor_tabs;
     let config = window_tab_data.common.config;
     let internal_command = window_tab_data.common.internal_command;
     let active_editor_tab = window_tab_data.main_split.active_editor_tab;
+    // Which pane the list loads files into, controlled by the toggle below.
+    let file_list_target = window_tab_data.main_split.file_list_target;
     let plugin = window_tab_data.plugin.clone();
 
     let child_view = move |plugin: PluginData,
+                           main_split: MainSplitData,
                            editor_tab: RwSignal<EditorTabData>,
                            child_index: RwSignal<usize>,
                            child: EditorTabChild| {
@@ -551,13 +560,10 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
             ))
             .style(|s| s.padding_horiz(6.0)),
             label(move || info.with(|info| info.name.clone())).style(move |s| {
-                s.apply_if(
-                    !info
-                        .with(|info| info.confirmed)
-                        .map(|confirmed| confirmed.get())
-                        .unwrap_or(true),
-                    |s| s.font_style(FontStyle::Italic),
-                )
+                // Set the font explicitly: dynamically created panel items do
+                // not inherit the UI font, and the plain fallback font cannot
+                // render CJK file names.
+                s.font_family(config.get().editor.font_family.clone())
             }),
         ))
         .style(move |s| {
@@ -580,41 +586,128 @@ fn open_editors_view(window_tab_data: Rc<WindowTabData>) -> impl View {
                 })
         })
         .on_event_cont(EventListener::PointerDown, move |_| {
-            editor_tab.update(|editor_tab| {
-                editor_tab.active = child_index.get_untracked();
-            });
-            active_editor_tab.set(Some(editor_tab_id));
+            // Load the clicked file into the pane chosen by the toggle.
+            let side = file_list_target.get_untracked();
+            main_split.open_in_side(
+                side,
+                editor_tab_id,
+                editor_tab,
+                child_index.get_untracked(),
+                &child,
+            );
         })
     };
 
-    scroll(
-        dyn_stack(
-            move || editor_tabs.get().into_iter().enumerate(),
-            move |(index, (editor_tab_id, _))| (*index, *editor_tab_id),
-            move |(index, (_, editor_tab))| {
-                let plugin = plugin.clone();
-                stack((
-                    label(move || format!("Group {}", index + 1))
-                        .style(|s| s.margin_left(10.0)),
-                    dyn_stack(
-                        move || editor_tab.get().children,
-                        move |(_, _, child)| child.id(),
-                        move |(child_index, _, child)| {
-                            child_view(
-                                plugin.clone(),
-                                editor_tab,
-                                child_index,
-                                child,
-                            )
-                        },
-                    )
-                    .style(|s| s.flex_col().width_pct(100.0)),
-                ))
-                .style(|s| s.flex_col())
-            },
+    // Every open child of both panes, as a single flat list.
+    let items = move || {
+        let mut items = Vec::new();
+        for (editor_tab_id, editor_tab) in editor_tabs.get() {
+            for (child_index, _, child) in editor_tab.get().children {
+                items.push((editor_tab_id, editor_tab, child_index, child));
+            }
+        }
+        items
+    };
+
+    // Left/right target toggle shown above the opened files list.
+    let side_button = move |side: SplitSide, text: &'static str| {
+        container(label(move || text.to_string()))
+            .on_event_stop(EventListener::PointerDown, move |_| {
+                file_list_target.set(side);
+            })
+            .style(move |s| {
+                let selected = file_list_target.get() == side;
+                let config = config.get();
+                s.padding_horiz(10.0)
+                    .padding_vert(2.0)
+                    .margin_right(4.0)
+                    .border_radius(4.0)
+                    .cursor(CursorStyle::Pointer)
+                    .apply_if(selected, |s| {
+                        s.background(
+                            config.color(LapceColor::PANEL_CURRENT_BACKGROUND),
+                        )
+                        .color(Color::from_rgb8(0xE0, 0x2F, 0x2F))
+                    })
+                    .apply_if(!selected, |s| {
+                        s.color(Color::from_rgb8(0xAA, 0xAA, 0xAA))
+                    })
+            })
+    };
+
+    let recent_files = main_split.recent_files;
+    let open_main_split = main_split.clone();
+    let recent_main_split = main_split.clone();
+
+    stack((
+        stack((
+            label(|| "Load into".to_string()).style(|s| s.margin_right(8.0)),
+            side_button(SplitSide::Left, "Left"),
+            side_button(SplitSide::Right, "Right"),
+        ))
+        .style(|s| s.items_center().padding_horiz(8.0).padding_vert(4.0)),
+        scroll(
+            stack((
+                dyn_stack(
+                    items,
+                    |(_, _, _, child)| child.id(),
+                    move |(_, editor_tab, child_index, child)| {
+                        child_view(
+                            plugin.clone(),
+                            open_main_split.clone(),
+                            editor_tab,
+                            child_index,
+                            child,
+                        )
+                    },
+                )
+                .style(|s| s.flex_col().width_pct(100.0)),
+                label(|| "Recent".to_string()).style(|s| {
+                    s.margin_left(10.0).margin_top(8.0).margin_bottom(2.0)
+                }),
+                dyn_stack(
+                    move || recent_files.get(),
+                    |path| path.clone(),
+                    move |path: PathBuf| {
+                        let recent_main_split = recent_main_split.clone();
+                        let path_for_click = path.clone();
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.display().to_string());
+                        container(
+                            label(move || name.clone()).style(move |s| {
+                                s.width_pct(100.0)
+                                    .padding_horiz(10.0)
+                                    .font_family(
+                                        config.get().editor.font_family.clone(),
+                                    )
+                            }),
+                        )
+                        .on_event_stop(EventListener::PointerDown, move |_| {
+                            recent_main_split.open_path_in_side(
+                                file_list_target.get_untracked(),
+                                path_for_click.clone(),
+                            );
+                        })
+                        .style(move |s| {
+                            let config = config.get();
+                            s.width_pct(100.0)
+                                .cursor(CursorStyle::Pointer)
+                                .hover(|s| {
+                                    s.background(config.color(
+                                        LapceColor::PANEL_HOVERED_BACKGROUND,
+                                    ))
+                                })
+                        })
+                    },
+                )
+                .style(|s| s.flex_col().width_pct(100.0)),
+            ))
+            .style(|s| s.flex_col().width_pct(100.0)),
         )
-        .style(|s| s.flex_col().width_pct(100.0)),
-    )
-    .style(|s| s.absolute().size_full().line_height(1.8))
+        .style(|s| s.flex_grow(1.0f32).flex_basis(0.0)),
+    ))
+    .style(|s| s.flex_col().size_full().line_height(1.8))
     .debug_name("Open Editors")
 }

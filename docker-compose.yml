@@ -1,0 +1,80 @@
+# Lapce - Docker Compose build orchestration.
+#
+# Build the `lapce` executable inside a container and drop it on the host:
+#
+#   docker compose run --rm --build lapce-build
+#   # -> ./target/docker/lapce
+#
+# Just build the images:
+#
+#   docker compose build lapce-build
+#
+# Optionally launch the freshly built GUI binary (Linux/X11/Wayland only):
+#
+#   docker compose --profile run up lapce
+#
+# All values below can be overridden from the shell or a .env file, e.g.
+#   CARGO_PROFILE=release CARGO_BUILD_JOBS=16 docker compose run --rm --build lapce-build
+
+name: lapce
+
+services:
+  # -------------------------------------------------------------------------
+  # Compiles Lapce in the builder stage and copies the executable to the host.
+  # -------------------------------------------------------------------------
+  lapce-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+      args:
+        RUST_VERSION: "${RUST_VERSION:-1}"
+        DEBIAN_CODENAME: "${DEBIAN_CODENAME:-bookworm}"
+        CARGO_PROFILE: "${CARGO_PROFILE:-release-lto}"
+        CARGO_BUILD_JOBS: "${CARGO_BUILD_JOBS:-8}"
+    image: "${BUILDER_IMAGE:-lapce-builder:local}"
+    working_dir: /source
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - |
+        set -euo pipefail
+        install -Dm755 /out/lapce /out-dir/lapce
+        # Match the ownership of the mounted output directory (i.e. the host user)
+        # so the artifact is not left owned by root.
+        chown --reference=/out-dir /out-dir/lapce 2>/dev/null || true
+        echo "==> executable written to ./target/docker/lapce"
+        ls -lh /out-dir/lapce
+        /out-dir/lapce --version || true
+    volumes:
+      - ./target/docker:/out-dir
+    # The build is the memory-hungry part; the copy itself needs almost nothing.
+    mem_limit: 512m
+
+  # -------------------------------------------------------------------------
+  # Optional: run the compiled GUI binary. Requires an X11 or Wayland session
+  # on the host. Opt in with `--profile run`.
+  # -------------------------------------------------------------------------
+  lapce:
+    profiles: ["run"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        RUST_VERSION: "${RUST_VERSION:-1}"
+        DEBIAN_CODENAME: "${DEBIAN_CODENAME:-bookworm}"
+        CARGO_PROFILE: "${CARGO_PROFILE:-release-lto}"
+        CARGO_BUILD_JOBS: "${CARGO_BUILD_JOBS:-8}"
+    image: "${RUNTIME_IMAGE:-lapce:local}"
+    environment:
+      DISPLAY: "${DISPLAY:-:0}"
+      WAYLAND_DISPLAY: "${WAYLAND_DISPLAY:-wayland-0}"
+      XDG_RUNTIME_DIR: /tmp/runtime
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - "${XDG_RUNTIME_DIR:-/tmp}:/tmp/runtime"
+      - "${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:ro"
+      - /dev/dri:/dev/dri
+      - ./workspace:/workspace
+    working_dir: /workspace
+    entrypoint: ["/usr/local/bin/lapce"]
