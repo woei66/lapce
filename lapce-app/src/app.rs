@@ -3754,10 +3754,21 @@ pub fn launch() {
     if !cli.new {
         match get_socket() {
             Ok(socket) => {
-                if let Err(e) = try_open_in_existing_process(socket, &cli.paths) {
-                    trace!(TraceLevel::ERROR, "failed to open path(s): {e}");
-                };
-                return;
+                match try_open_in_existing_process(socket, &cli.paths) {
+                    Ok(()) => return,
+                    Err(e) => {
+                        // The other instance did not answer within the timeout
+                        // (it is most likely shutting down). Drop the stale
+                        // socket and start a new instance instead of exiting
+                        // without ever showing a window.
+                        trace!(TraceLevel::ERROR, "failed to open path(s): {e}");
+                        if let Some(local_socket) = Directory::local_socket() {
+                            if let Err(err) = std::fs::remove_file(&local_socket) {
+                                tracing::error!("{:?}", err);
+                            }
+                        }
+                    }
+                }
             }
             Err(err) => {
                 tracing::error!("{:?}", err);

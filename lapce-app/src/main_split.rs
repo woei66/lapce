@@ -1987,9 +1987,13 @@ impl MainSplitData {
     /// A layout that is already split is left untouched. A restored single pane
     /// keeps its open files and simply gains a second pane next to it.
     pub fn init_two_pane_layout(&self) {
-        enum LeftPane {
-            EditorTab(EditorTabId),
-            Split,
+        enum LayoutState {
+            /// Two or more panes already exist (e.g. restored from the last
+            /// session), so they are kept exactly as they are.
+            Ready,
+            /// A single editor tab exists and needs its sibling pane.
+            SinglePane(EditorTabId),
+            /// No panes yet.
             Empty,
         }
 
@@ -2000,20 +2004,30 @@ impl MainSplitData {
             return;
         };
 
-        let left_pane =
-            root_split.with_untracked(|split| match split.children.first() {
-                Some((_, SplitContent::EditorTab(editor_tab_id))) => {
-                    LeftPane::EditorTab(*editor_tab_id)
+        let state = root_split.with_untracked(|split| {
+            let mut panes = 0usize;
+            for (_, child) in split.children.iter() {
+                match child {
+                    SplitContent::EditorTab(_) => panes += 1,
+                    // A nested split already holds the panes.
+                    SplitContent::Split(_) => return LayoutState::Ready,
                 }
-                // Already a nested split, so there are panes; leave it alone.
-                Some((_, SplitContent::Split(_))) => LeftPane::Split,
-                None => LeftPane::Empty,
-            });
+            }
+            match (panes, split.children.first()) {
+                (0, _) => LayoutState::Empty,
+                (1, Some((_, SplitContent::EditorTab(editor_tab_id)))) => {
+                    LayoutState::SinglePane(*editor_tab_id)
+                }
+                _ => LayoutState::Ready,
+            }
+        });
 
-        let left_tab_id = match left_pane {
-            LeftPane::EditorTab(editor_tab_id) => editor_tab_id,
-            LeftPane::Split => return,
-            LeftPane::Empty => {
+        let left_tab_id = match state {
+            // A restored layout already has both panes: leave it untouched so
+            // that the files which were open in each pane come back.
+            LayoutState::Ready => return,
+            LayoutState::SinglePane(editor_tab_id) => editor_tab_id,
+            LayoutState::Empty => {
                 // Fresh workspace: create the first editor tab with an empty
                 // file.
                 self.get_editor_tab_child(

@@ -396,11 +396,14 @@ impl FileExplorerData {
         if self.is_dir(path) {
             self.toggle_expand(path);
         } else if !config.get_untracked().core.file_explorer_double_click {
-            self.common
-                .internal_command
-                .send(InternalCommand::OpenFile {
+            // Single click opens the file in its own tab. Sending the
+            // "confirmed" variant keeps it as a real tab instead of a preview
+            // that the next click would replace.
+            self.common.internal_command.send(
+                InternalCommand::OpenAndConfirmedFile {
                     path: path.to_path_buf(),
-                })
+                },
+            )
         }
     }
 
