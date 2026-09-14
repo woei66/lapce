@@ -1550,16 +1550,11 @@ impl WindowTabData {
                 );
             }
             InternalCommand::OpenAndConfirmedFile { path } => {
-                self.main_split.jump_to_location(
-                    EditorLocation {
-                        path,
-                        position: None,
-                        scroll_offset: None,
-                        ignore_unconfirmed: false,
-                        same_editor_tab: false,
-                    },
-                    None,
-                );
+                // Load the file into the pane picked by the Left/Right toggle
+                // above the file list, instead of whichever pane happens to
+                // have focus.
+                let side = self.main_split.file_list_target.get_untracked();
+                self.main_split.open_path_in_side(side, path);
                 if let Some(editor) = self.main_split.active_editor.get_untracked() {
                     editor.confirmed.set(true);
                 }
