@@ -78,7 +78,7 @@ pub enum SplitSide {
 }
 
 /// How many recently opened files are remembered.
-const RECENT_FILES_LIMIT: usize = 10;
+const RECENT_FILES_LIMIT: usize = 20;
 
 impl SplitMoveDirection {
     pub fn direction(&self) -> SplitDirection {
