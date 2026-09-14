@@ -1456,13 +1456,13 @@ fn editor_tab(
     let internal_command = main_split.common.internal_command;
     let tab_size = create_rw_signal(Size::ZERO);
     let drag_over: RwSignal<Option<DragOverPosition>> = create_rw_signal(None);
-    // Thin bar marking which pane is active: red for the active pane, gray for
-    // the inactive one.
+    // Thin bar marking which pane is active: #90a959 for the active pane, gray
+    // for the inactive one.
     let active_bar = empty().style(move |s| {
         s.width_full()
             .height(3.0)
             .background(if active_editor_tab.get() == Some(editor_tab_id) {
-                Color::from_rgb8(0xE0, 0x2F, 0x2F)
+                Color::from_rgb8(0x90, 0xA9, 0x59)
             } else {
                 Color::from_rgb8(0x44, 0x44, 0x44)
             })
@@ -1652,12 +1652,12 @@ fn editor_tab(
             .dispose();
     })
     .style(move |s| {
-        // Frame the active pane in red so it is obvious which side is being
-        // edited. The inactive pane gets a transparent border of the same width
-        // so the layout does not shift.
+        // Frame the active pane in #90a959 so it is obvious which side is
+        // being edited. The inactive pane gets a transparent border of the same
+        // width so the layout does not shift.
         let active = active_editor_tab.get() == Some(editor_tab_id);
         s.flex_col().size_full().border(2.0).border_color(if active {
-            Color::from_rgb8(0xE0, 0x2F, 0x2F)
+            Color::from_rgb8(0x90, 0xA9, 0x59)
         } else {
             Color::from_rgba8(0, 0, 0, 0)
         })
