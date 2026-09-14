@@ -33,7 +33,6 @@ pub fn default_panel_order() -> PanelOrder {
             PanelKind::FileExplorer,
             PanelKind::Plugin,
             PanelKind::SourceControl,
-            PanelKind::Debug,
         ],
     );
     order.insert(

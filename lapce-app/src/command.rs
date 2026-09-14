@@ -11,7 +11,6 @@ use lapce_core::command::{
     MultiSelectionCommand, ScrollCommand,
 };
 use lapce_rpc::{
-    dap_types::{DapId, RunDebugConfig},
     plugin::{PluginId, VoltID},
     proxy::ProxyStatus,
     terminal::{TermId, TerminalProfile},
@@ -23,7 +22,6 @@ use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
 use crate::{
     alert::AlertButton,
-    debug::RunDebugMode,
     doc::Doc,
     editor::location::EditorLocation,
     editor_tab::EditorTabChild,
@@ -386,10 +384,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "palette.workspace")]
     PaletteWorkspace,
 
-    #[strum(message = "Run and Debug")]
-    #[strum(serialize = "palette.run_and_debug")]
-    PaletteRunAndDebug,
-
     #[strum(message = "Source Control: Checkout")]
     #[strum(serialize = "palette.scm_references")]
     PaletteSCMReferences,
@@ -401,14 +395,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "List Palette Types and Files")]
     #[strum(serialize = "palette.palette_help_and_file")]
     PaletteHelpAndFile,
-
-    #[strum(message = "Run and Debug Restart Current Running")]
-    #[strum(serialize = "palette.run_and_debug_restart")]
-    RunAndDebugRestart,
-
-    #[strum(message = "Run and Debug Stop Current Running")]
-    #[strum(serialize = "palette.run_and_debug_stop")]
-    RunAndDebugStop,
 
     #[strum(serialize = "source_control.checkout_reference")]
     CheckoutReference,
@@ -481,9 +467,6 @@ pub enum LapceWorkbenchCommand {
 
     #[strum(serialize = "toggle_problem_visual")]
     ToggleProblemVisual,
-
-    #[strum(serialize = "toggle_debug_visual")]
-    ToggleDebugVisual,
 
     #[strum(serialize = "toggle_search_visual")]
     ToggleSearchVisual,
@@ -596,10 +579,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "go_to_location")]
     #[strum(message = "Go to Location")]
     GoToLocation,
-
-    #[strum(serialize = "add_run_debug_config")]
-    #[strum(message = "Add Run Debug Config")]
-    AddRunDebugConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -700,10 +679,6 @@ pub enum InternalCommand {
     ApplyWorkspaceEdit {
         edit: WorkspaceEdit,
     },
-    RunAndDebug {
-        mode: RunDebugMode,
-        config: RunDebugConfig,
-    },
     StartRename {
         path: PathBuf,
         placeholder: String,
@@ -767,10 +742,6 @@ pub enum InternalCommand {
     UpdateProxyStatus {
         status: ProxyStatus,
     },
-    DapFrameScopes {
-        dap_id: DapId,
-        frame_id: usize,
-    },
     OpenVoltView {
         volt_id: VoltID,
     },
@@ -790,12 +761,6 @@ pub enum InternalCommand {
     },
     CallHierarchyIncoming {
         item_id: ViewId,
-    },
-    StopTerminal {
-        term_id: TermId,
-    },
-    RestartTerminal {
-        term_id: TermId,
     },
 }
 

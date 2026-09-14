@@ -25,7 +25,6 @@ use super::plugin::VoltID;
 use crate::{
     RequestId, RpcError, RpcMessage,
     buffer::BufferId,
-    dap_types::{self, DapId, RunDebugConfig, SourceBreakpoint, ThreadId},
     file::{FileNodeItem, PathObject},
     file_line::FileLine,
     plugin::{PluginId, VoltInfo, VoltMetadata},
@@ -209,14 +208,6 @@ pub enum ProxyRequest {
     TestCreateAtPath {
         path: PathBuf,
     },
-    DapVariable {
-        dap_id: DapId,
-        reference: usize,
-    },
-    DapGetScopes {
-        dap_id: DapId,
-        frame_id: usize,
-    },
     ReferencesResolve {
         items: Vec<Location>,
     },
@@ -306,50 +297,6 @@ pub enum ProxyNotification {
     },
     TerminalClose {
         term_id: TermId,
-    },
-    DapStart {
-        config: RunDebugConfig,
-        breakpoints: HashMap<PathBuf, Vec<SourceBreakpoint>>,
-    },
-    DapProcessId {
-        dap_id: DapId,
-        process_id: Option<u32>,
-        term_id: TermId,
-    },
-    DapContinue {
-        dap_id: DapId,
-        thread_id: ThreadId,
-    },
-    DapStepOver {
-        dap_id: DapId,
-        thread_id: ThreadId,
-    },
-    DapStepInto {
-        dap_id: DapId,
-        thread_id: ThreadId,
-    },
-    DapStepOut {
-        dap_id: DapId,
-        thread_id: ThreadId,
-    },
-    DapPause {
-        dap_id: DapId,
-        thread_id: ThreadId,
-    },
-    DapStop {
-        dap_id: DapId,
-    },
-    DapDisconnect {
-        dap_id: DapId,
-    },
-    DapRestart {
-        dap_id: DapId,
-        breakpoints: HashMap<PathBuf, Vec<SourceBreakpoint>>,
-    },
-    DapSetBreakpoints {
-        dap_id: DapId,
-        path: PathBuf,
-        breakpoints: Vec<SourceBreakpoint>,
     },
 }
 
@@ -453,12 +400,6 @@ pub enum ProxyResponse {
     },
     GlobalSearchResponse {
         matches: IndexMap<PathBuf, Vec<SearchMatch>>,
-    },
-    DapVariableResponse {
-        variables: Vec<dap_types::Variable>,
-    },
-    DapGetScopesResponse {
-        scopes: Vec<(dap_types::Scope, Vec<dap_types::Variable>)>,
     },
     CreatePathResponse {
         path: PathBuf,
@@ -1116,100 +1057,6 @@ impl ProxyRpcHandler {
         f: impl ProxyCallback + 'static,
     ) {
         self.request_async(ProxyRequest::GetSelectionRange { path, positions }, f);
-    }
-
-    pub fn dap_start(
-        &self,
-        config: RunDebugConfig,
-        breakpoints: HashMap<PathBuf, Vec<SourceBreakpoint>>,
-    ) {
-        self.notification(ProxyNotification::DapStart {
-            config,
-            breakpoints,
-        })
-    }
-
-    pub fn dap_process_id(
-        &self,
-        dap_id: DapId,
-        process_id: Option<u32>,
-        term_id: TermId,
-    ) {
-        self.notification(ProxyNotification::DapProcessId {
-            dap_id,
-            process_id,
-            term_id,
-        })
-    }
-
-    pub fn dap_restart(
-        &self,
-        dap_id: DapId,
-        breakpoints: HashMap<PathBuf, Vec<SourceBreakpoint>>,
-    ) {
-        self.notification(ProxyNotification::DapRestart {
-            dap_id,
-            breakpoints,
-        })
-    }
-
-    pub fn dap_continue(&self, dap_id: DapId, thread_id: ThreadId) {
-        self.notification(ProxyNotification::DapContinue { dap_id, thread_id })
-    }
-
-    pub fn dap_step_over(&self, dap_id: DapId, thread_id: ThreadId) {
-        self.notification(ProxyNotification::DapStepOver { dap_id, thread_id })
-    }
-
-    pub fn dap_step_into(&self, dap_id: DapId, thread_id: ThreadId) {
-        self.notification(ProxyNotification::DapStepInto { dap_id, thread_id })
-    }
-
-    pub fn dap_step_out(&self, dap_id: DapId, thread_id: ThreadId) {
-        self.notification(ProxyNotification::DapStepOut { dap_id, thread_id })
-    }
-
-    pub fn dap_pause(&self, dap_id: DapId, thread_id: ThreadId) {
-        self.notification(ProxyNotification::DapPause { dap_id, thread_id })
-    }
-
-    pub fn dap_stop(&self, dap_id: DapId) {
-        self.notification(ProxyNotification::DapStop { dap_id })
-    }
-
-    pub fn dap_disconnect(&self, dap_id: DapId) {
-        self.notification(ProxyNotification::DapDisconnect { dap_id })
-    }
-
-    pub fn dap_set_breakpoints(
-        &self,
-        dap_id: DapId,
-        path: PathBuf,
-        breakpoints: Vec<SourceBreakpoint>,
-    ) {
-        self.notification(ProxyNotification::DapSetBreakpoints {
-            dap_id,
-            path,
-            breakpoints,
-        })
-    }
-
-    pub fn dap_variable(
-        &self,
-        dap_id: DapId,
-        reference: usize,
-        f: impl ProxyCallback + 'static,
-    ) {
-        self.request_async(ProxyRequest::DapVariable { dap_id, reference }, f);
-    }
-
-    pub fn dap_get_scopes(
-        &self,
-        dap_id: DapId,
-        frame_id: usize,
-        f: impl ProxyCallback + 'static,
-    ) {
-        self.request_async(ProxyRequest::DapGetScopes { dap_id, frame_id }, f);
     }
 }
 

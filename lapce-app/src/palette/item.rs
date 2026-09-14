@@ -1,12 +1,10 @@
 use std::path::PathBuf;
 
 use lapce_core::line_ending::LineEnding;
-use lapce_rpc::dap_types::RunDebugConfig;
 use lsp_types::{Range, SymbolKind};
 
 use crate::{
     command::{LapceCommand, LapceWorkbenchCommand},
-    debug::RunDebugMode,
     editor::location::EditorLocation,
     workspace::{LapceWorkspace, SshHost},
 };
@@ -60,10 +58,6 @@ pub enum PaletteItemContent {
     #[cfg(windows)]
     WslHost {
         host: crate::workspace::WslHost,
-    },
-    RunAndDebug {
-        mode: RunDebugMode,
-        config: RunDebugConfig,
     },
     ColorTheme {
         name: String,

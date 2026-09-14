@@ -65,87 +65,6 @@ fn left(
                 .margin_right(6.0)
                 .apply_if(is_macos, |s| s.hide())
         }),
-        tooltip_label(
-            config,
-            container(svg(move || config.get().ui_svg(LapceIcons::REMOTE)).style(
-                move |s| {
-                    let config = config.get();
-                    let size = (config.ui.icon_size() as f32 + 2.0).min(30.0);
-                    s.size(size, size).color(if is_local {
-                        config.color(LapceColor::LAPCE_ICON_ACTIVE)
-                    } else {
-                        match proxy_status.get() {
-                            Some(_) => Color::WHITE,
-                            None => config.color(LapceColor::LAPCE_ICON_ACTIVE),
-                        }
-                    })
-                },
-            )),
-            || "Connect to Remote",
-        )
-        .popout_menu(move || {
-            #[allow(unused_mut)]
-            let mut menu = Menu::new("").entry(
-                MenuItem::new("Connect to SSH Host").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::ConnectSshHost);
-                }),
-            );
-            if !is_local
-                && proxy_status.get().is_some_and(|p| {
-                    matches!(p, ProxyStatus::Connecting | ProxyStatus::Connected)
-                })
-            {
-                menu = menu.entry(MenuItem::new("Disconnect remote").action(
-                    move || {
-                        workbench_command
-                            .send(LapceWorkbenchCommand::DisconnectRemote);
-                    },
-                ));
-            }
-            #[cfg(windows)]
-            {
-                menu = menu.entry(MenuItem::new("Connect to WSL Host").action(
-                    move || {
-                        workbench_command
-                            .send(LapceWorkbenchCommand::ConnectWslHost);
-                    },
-                ));
-            }
-            menu
-        })
-        .style(move |s| {
-            let config = config.get();
-            let color = if is_local {
-                Color::TRANSPARENT
-            } else {
-                match proxy_status.get() {
-                    Some(ProxyStatus::Connected) => {
-                        config.color(LapceColor::LAPCE_REMOTE_CONNECTED)
-                    }
-                    Some(ProxyStatus::Connecting) => {
-                        config.color(LapceColor::LAPCE_REMOTE_CONNECTING)
-                    }
-                    Some(ProxyStatus::Disconnected) => {
-                        config.color(LapceColor::LAPCE_REMOTE_DISCONNECTED)
-                    }
-                    None => Color::TRANSPARENT,
-                }
-            };
-            s.height_pct(100.0)
-                .padding_horiz(10.0)
-                .items_center()
-                .background(color)
-                .hover(|s| {
-                    s.cursor(CursorStyle::Pointer).background(
-                        config.color(LapceColor::PANEL_HOVERED_BACKGROUND),
-                    )
-                })
-                .active(|s| {
-                    s.cursor(CursorStyle::Pointer).background(
-                        config.color(LapceColor::PANEL_HOVERED_ACTIVE_BACKGROUND),
-                    )
-                })
-        }),
         drag_window_area(empty())
             .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
     ))
@@ -275,17 +194,6 @@ fn middle(
                 .background(config.color(LapceColor::PANEL_HEADER_BACKGROUND))
         }),
         stack((
-            clickable_icon(
-                || LapceIcons::START,
-                move || {
-                    workbench_command.send(LapceWorkbenchCommand::PaletteRunAndDebug)
-                },
-                || false,
-                || false,
-                || "Run and Debug",
-                config,
-            )
-            .style(move |s| s.margin_horiz(6.0)),
             drag_window_area(empty())
                 .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
         ))

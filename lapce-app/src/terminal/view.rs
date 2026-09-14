@@ -32,7 +32,6 @@ use super::{panel::TerminalPanelData, raw::RawTerminal};
 use crate::{
     command::InternalCommand,
     config::{LapceConfig, color::LapceColor},
-    debug::RunDebugProcess,
     editor::location::{EditorLocation, EditorPosition},
     listener::Listener,
     panel::kind::PanelKind,
@@ -65,7 +64,6 @@ pub struct TerminalView {
     size: Size,
     is_focused: bool,
     config: ReadSignal<Arc<LapceConfig>>,
-    run_config: ReadSignal<Option<RunDebugProcess>>,
     proxy: ProxyRpcHandler,
     launch_error: RwSignal<Option<String>>,
     internal_command: Listener<InternalCommand>,
@@ -80,7 +78,6 @@ pub fn terminal_view(
     term_id: TermId,
     raw: ReadSignal<Arc<RwLock<RawTerminal>>>,
     mode: ReadSignal<Mode>,
-    run_config: ReadSignal<Option<RunDebugProcess>>,
     terminal_panel_data: TerminalPanelData,
     launch_error: RwSignal<Option<String>>,
     internal_command: Listener<InternalCommand>,
@@ -135,7 +132,6 @@ pub fn terminal_view(
         mode,
         config,
         proxy,
-        run_config,
         size: Size::ZERO,
         is_focused: false,
         launch_error,
@@ -456,13 +452,7 @@ impl TerminalView {
                     .with_origin(Point::new(x, line_content.y));
             let mode = self.mode.get_untracked();
             let cursor_color = if mode == Mode::Terminal {
-                if self.run_config.with_untracked(|run_config| {
-                    run_config.as_ref().map(|r| r.stopped).unwrap_or(false)
-                }) {
-                    config.color(LapceColor::LAPCE_ERROR)
-                } else {
-                    config.color(LapceColor::TERMINAL_CURSOR)
-                }
+                config.color(LapceColor::TERMINAL_CURSOR)
             } else {
                 config.color(LapceColor::EDITOR_CARET)
             };
