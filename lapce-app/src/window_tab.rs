@@ -35,6 +35,7 @@ use lapce_core::{
 };
 use lapce_rpc::{
     RpcError,
+    buffer::BufferId,
     core::CoreNotification,
     file::{Naming, PathObject},
     plugin::PluginId,
@@ -123,6 +124,14 @@ pub struct WorkProgress {
     pub percentage: Option<u32>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectionOccurrences {
+    /// The selected text being searched for.
+    pub text: String,
+    /// Buffer id -> byte ranges of every occurrence in that document.
+    pub ranges: im::HashMap<BufferId, im::Vector<(usize, usize)>>,
+}
+
 #[derive(Clone)]
 pub struct CommonData {
     pub workspace: Arc<LapceWorkspace>,
@@ -150,6 +159,8 @@ pub struct CommonData {
     pub mouse_hover_timer: RwSignal<TimerToken>,
     // the current focused view which will receive keyboard events
     pub keyboard_focus: RwSignal<Option<ViewId>>,
+    /// Occurrences of the currently selected text, highlighted in every editor.
+    pub selection_occurrences: RwSignal<Option<SelectionOccurrences>>,
     pub window_common: Rc<WindowCommonData>,
 }
 
@@ -383,6 +394,7 @@ impl WindowTabData {
             mouse_hover_timer: cx.create_rw_signal(TimerToken::INVALID),
             window_origin: cx.create_rw_signal(Point::ZERO),
             keyboard_focus: cx.create_rw_signal(None),
+            selection_occurrences: cx.create_rw_signal(None),
             window_common: window_common.clone(),
         });
 

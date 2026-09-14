@@ -53,7 +53,7 @@ use crate::{
     },
     keypress::{EventRef, KeyPressData, KeyPressHandle},
     panel::implementation_view::ReferencesRoot,
-    window_tab::{CommonData, Focus, WindowTabData},
+    window_tab::{CommonData, Focus, SelectionOccurrences, WindowTabData},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -534,6 +534,94 @@ impl MainSplitData {
                 if data.file_list_target.get_untracked() != side {
                     data.file_list_target.set(side);
                 }
+            });
+        }
+
+        // Highlight occurrences of the currently selected text in every open
+        // editor, regardless of tab or pane. The selection is read reactively
+        // so the highlight follows double-click selections and disappears as
+        // soon as the selection is cleared.
+        {
+            let data = data.clone();
+            cx.create_effect(move |_| {
+                let selected = data.active_editor.get().and_then(|editor| {
+                    let (start, end) = editor.cursor().with(|cursor| {
+                        let mut regions = cursor.regions_iter();
+                        match (regions.next(), regions.next()) {
+                            (Some((start, end)), None) if start != end => {
+                                Some((start, end))
+                            }
+                            _ => None,
+                        }
+                    })?;
+                    let content = editor
+                        .doc()
+                        .buffer
+                        .with_untracked(|buffer| buffer.to_string());
+                    let text = content.get(start..end)?.to_string();
+                    if text.is_empty()
+                        || text.len() > 100
+                        || text.contains('\n')
+                    {
+                        return None;
+                    }
+                    Some(text)
+                });
+
+                let Some(text) = selected else {                    if data
+                        .common
+                        .selection_occurrences
+                        .get_untracked()
+                        .is_some()
+                    {
+                        data.common.selection_occurrences.set(None);
+                    }
+                    return;
+                };
+
+                // Keep the existing scan while the same text stays selected.
+                if data
+                    .common
+                    .selection_occurrences
+                    .with_untracked(|occurrences| {
+                        occurrences
+                            .as_ref()
+                            .is_some_and(|occurrences| occurrences.text == text)
+                    })
+                {
+                    return;
+                }
+
+                let ranges = data.editors.with_editors_untracked(|editors| {
+                    let mut ranges: im::HashMap<
+                        BufferId,
+                        im::Vector<(usize, usize)>,
+                    > = im::HashMap::new();
+                    for editor in editors.values() {
+                        let doc = editor.doc();
+                        if ranges.contains_key(&doc.buffer_id) {
+                            continue;
+                        }
+                        let content = doc
+                            .buffer
+                            .with_untracked(|buffer| buffer.to_string());
+                        let mut occurrences = im::Vector::new();
+                        for (start, _) in content.match_indices(text.as_str()) {
+                            if occurrences.len() >= 2000 {
+                                break;
+                            }
+                            occurrences.push_back((start, start + text.len()));
+                        }
+                        if !occurrences.is_empty() {
+                            ranges.insert(doc.buffer_id, occurrences);
+                        }
+                    }
+                    ranges
+                });
+
+                data.common
+                    .selection_occurrences
+                    .set(Some(SelectionOccurrences { text, ranges }));
             });
         }
 

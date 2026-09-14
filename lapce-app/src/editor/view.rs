@@ -157,8 +157,10 @@ pub fn editor_view(
     });
 
     let hide_cursor = e_data.common.window_common.hide_cursor;
+    let selection_occurrences = e_data.common.selection_occurrences;
     create_effect(move |_| {
         hide_cursor.track();
+        selection_occurrences.track();
         let occurrences = doc.with(|doc| doc.find_result.occurrences);
         occurrences.track();
         id.request_paint();
@@ -561,6 +563,45 @@ impl EditorView {
                     .with_origin(Point::new(x0, line_info.vline_y));
                 cx.stroke(&rect, color, &Stroke::new(1.0));
             }
+        }
+    }
+
+    fn paint_selection_occurrences(
+        &self,
+        cx: &mut PaintCx,
+        screen_lines: &ScreenLines,
+    ) {
+        let Some(occurrences) =
+            self.editor.common.selection_occurrences.get()
+        else {
+            return;
+        };
+        if screen_lines.lines.is_empty() {
+            return;
+        }
+
+        let e_data = &self.editor;
+        let ed = &e_data.editor;
+        let doc = e_data.doc();
+        let Some(ranges) = occurrences.ranges.get(&doc.buffer_id).cloned()
+        else {
+            return;
+        };
+
+        let config = self.editor.common.config.get_untracked();
+        let line_height = config.editor.line_height() as f64;
+        let color = config.color(LapceColor::EDITOR_FOREGROUND);
+
+        for (start, end) in ranges.iter() {
+            let region = SelRegion::new(*start, *end, None);
+            self.paint_find_region(
+                cx,
+                ed,
+                &region,
+                color,
+                screen_lines,
+                line_height,
+            );
         }
     }
 
@@ -1102,6 +1143,8 @@ impl View for EditorView {
         self.paint_diff_sections(cx, viewport, &screen_lines, &config);
         let screen_lines = ed.screen_lines.get_untracked();
         self.paint_find(cx, &screen_lines);
+        let screen_lines = ed.screen_lines.get_untracked();
+        self.paint_selection_occurrences(cx, &screen_lines);
         let screen_lines = ed.screen_lines.get_untracked();
         self.paint_bracket_highlights_scope_lines(cx, viewport, &screen_lines);
         let screen_lines = ed.screen_lines.get_untracked();
