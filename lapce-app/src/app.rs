@@ -16,10 +16,13 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use floem::{
-    IntoView, View,
+    AnyView, IntoView, View,
     action::show_context_menu,
     event::{Event, EventListener, EventPropagation},
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::{
+        create_ext_action, create_signal_from_channel, create_trigger,
+        register_ext_trigger,
+    },
     menu::{Menu, MenuItem},
     peniko::{
         Color,
@@ -27,8 +30,9 @@ use floem::{
     },
     prelude::SignalTrack,
     reactive::{
-        ReadSignal, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
-        create_effect, create_memo, create_rw_signal, provide_context, use_context,
+        Memo, ReadSignal, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith,
+        create_effect, create_memo, create_rw_signal, provide_context,
+        use_context,
     },
     style::{
         AlignItems, CursorStyle, Display, FlexDirection, JustifyContent, Position,
@@ -42,7 +46,7 @@ use floem::{
     unit::PxPctAuto,
     views::{
         Decorators, VirtualVector, clip, container, drag_resize_window_area,
-        drag_window_area, dyn_stack,
+        drag_window_area, dyn_container, dyn_stack,
         editor::{core::register::Clipboard, text::SystemClipboard},
         empty, label, rich_text,
         scroll::{PropagatePointerWheel, VerticalScrollAsHorizontal, scroll},
@@ -92,7 +96,7 @@ use crate::{
     main_split::{
         SplitContent, SplitData, SplitDirection, SplitMoveDirection, TabCloseKind,
     },
-    markdown::MarkdownContent,
+    markdown::{MarkdownContent, parse_markdown_with_color},
     palette::{
         PaletteStatus,
         item::{PaletteItem, PaletteItemContent},
@@ -1413,6 +1417,267 @@ fn editor_tab_content(
         .debug_name("Editor Tab Content")
 }
 
+/// Two small buttons shown above an editor pane that switch the pane between
+/// the raw editor ("Raw") and a rendered markdown preview ("Preview").
+///
+/// The state lives on the pane itself, so the left and right panes (and any
+/// extra split) toggle independently of each other.
+fn pane_preview_toggle(
+    preview: RwSignal<bool>,
+    has_editor: Memo<bool>,
+    config: ReadSignal<Arc<LapceConfig>>,
+) -> impl View {
+    let button = move |wants_preview: bool, text: &'static str| {
+        container(label(move || text.to_string()))
+            .on_event_stop(EventListener::PointerDown, move |_| {
+                preview.set(wants_preview);
+            })
+            .style(move |s| {
+                let selected = preview.get() == wants_preview;
+                let config = config.get();
+                s.padding_horiz(8.0)
+                    .padding_vert(1.0)
+                    .border_radius(4.0)
+                    .cursor(CursorStyle::Pointer)
+                    .apply_if(selected, |s| {
+                        // Keep the bar's background and just flag the active
+                        // mode in red, which stays legible on every theme.
+                        s.color(Color::from_rgb8(0xE0, 0x2F, 0x2F))
+                    })
+                    .apply_if(!selected, |s| {
+                        s.color(config.color(LapceColor::PANEL_FOREGROUND_DIM))
+                    })
+            })
+    };
+
+    stack((
+        label(|| "View".to_string()).style(move |s| {
+            s.margin_right(6.0)
+                .color(config.get().color(LapceColor::PANEL_FOREGROUND_DIM))
+        }),
+        button(false, "Raw"),
+        button(true, "Preview"),
+    ))
+    .style(move |s| {
+        // The toggle only makes sense for panes showing an editor document;
+        // settings, diff and plugin tabs always render their own view.
+        if !has_editor.get() {
+            return s.display(Display::None);
+        }
+        let config = config.get();
+        s.items_center()
+            .gap(4.0)
+            .padding_horiz(8.0)
+            .padding_vert(2.0)
+            .border_top(1.0)
+            .border_bottom(1.0)
+            .border_color(config.color(LapceColor::LAPCE_BORDER))
+            .background(config.color(LapceColor::PANEL_BACKGROUND))
+    })
+    .debug_name("Pane Preview Toggle")
+}
+
+/// The markdown preview for a pane.
+///
+/// On Linux the preview is rendered by an embedded WebKitGTK view; elsewhere
+/// (and if WebKitGTK is unavailable) the native floem rendering is used.
+fn markdown_preview_view(
+    window_tab_data: Rc<WindowTabData>,
+    editor_tab: RwSignal<EditorTabData>,
+) -> AnyView {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(view) =
+            webkit_markdown_preview(window_tab_data.clone(), editor_tab)
+        {
+            return view;
+        }
+    }
+    floem_markdown_preview(window_tab_data, editor_tab).into_any()
+}
+
+#[cfg(target_os = "linux")]
+fn webkit_markdown_preview(
+    window_tab_data: Rc<WindowTabData>,
+    editor_tab: RwSignal<EditorTabData>,
+) -> Option<AnyView> {
+    use crate::webkit_preview::{PreviewColors, WebkitPreview, build_html};
+
+    // Clicks on the preview are delivered to the WebKit window, so floem never
+    // sees them; this trigger routes them back to the UI thread to activate the
+    // owning pane.
+    let activate = create_trigger();
+    {
+        let internal_command = window_tab_data.common.internal_command;
+        let editor_tab_id =
+            editor_tab.with_untracked(|editor_tab| editor_tab.editor_tab_id);
+        create_effect(move |_| {
+            activate.track();
+            internal_command.send(InternalCommand::FocusEditorTab { editor_tab_id });
+        });
+    }
+
+    let preview =
+        Rc::new(WebkitPreview::spawn(move || register_ext_trigger(activate))?);
+    let editors = window_tab_data.main_split.editors;
+    let config = window_tab_data.common.config;
+    let origin = create_rw_signal(Point::ZERO);
+    let size = create_rw_signal(Size::ZERO);
+
+    // Which editor this pane shows, so the preview only reparses when it
+    // changes (not on every pane layout update).
+    let active_editor = create_memo(move |_| {
+        editor_tab.with(|editor_tab| {
+            editor_tab.children.get(editor_tab.active).and_then(
+                |(_, _, child)| match child {
+                    EditorTabChild::Editor(editor_id) => Some(*editor_id),
+                    _ => None,
+                },
+            )
+        })
+    });
+
+    {
+        let preview = preview.clone();
+        create_effect(move |_| {
+            let x = origin.get().x;
+            let y = origin.get().y;
+            let width = size.get().width;
+            let height = size.get().height;
+            if width > 1.0 && height > 1.0 {
+                preview.set_bounds(x, y, width, height);
+                preview.set_visible(true);
+            }
+        });
+    }
+
+    {
+        let preview = preview.clone();
+        create_effect(move |_| {
+            let Some(editor_id) = active_editor.get() else {
+                return;
+            };
+            let Some(editor) = editors.editor(editor_id) else {
+                return;
+            };
+            let markdown = editor.doc().buffer.with(|buffer| buffer.to_string());
+            let colors = PreviewColors::from_config(&config.get());
+            preview.set_html(build_html(&markdown, &colors));
+        });
+    }
+
+    Some(
+        container(empty())
+            .on_move(move |point| origin.set(point))
+            .on_resize(move |rect| size.set(rect.size()))
+            .on_cleanup(move || {
+                // Hold the handle until the view is disposed; dropping it here
+                // closes the WebKit preview window.
+                let _ = &preview;
+            })
+            .style(|s| s.size_full())
+            .debug_name("WebKit Markdown Preview")
+            .into_any(),
+    )
+}
+
+/// Native floem markdown rendering, used outside Linux.
+///
+/// It is re-parsed whenever the document changes, so a pane showing the preview
+/// follows edits made in another pane that has the same file open.
+fn floem_markdown_preview(
+    window_tab_data: Rc<WindowTabData>,
+    editor_tab: RwSignal<EditorTabData>,
+) -> impl View {
+    let editors = window_tab_data.main_split.editors;
+    let config = window_tab_data.common.config;
+    let content = create_rw_signal(Vec::<MarkdownContent>::new());
+    // Width the preview text may use, so long lines wrap to the pane instead of
+    // overflowing sideways. It starts at zero and is set from the scroll view's
+    // size on the first resize: a large initial value would let the text claim
+    // the whole split for one layout pass, which the pane then keeps.
+    let text_width = create_rw_signal(0.0);
+    let id = AtomicU64::new(0);
+
+    // Which editor this pane currently shows. Going through a memo keeps the
+    // parse below from rerunning on every layout update of the pane (which
+    // happens on each mouse move); it only reruns when the shown editor changes.
+    let active_editor = create_memo(move |_| {
+        editor_tab.with(|editor_tab| {
+            editor_tab.children.get(editor_tab.active).and_then(
+                |(_, _, child)| match child {
+                    EditorTabChild::Editor(editor_id) => Some(*editor_id),
+                    _ => None,
+                },
+            )
+        })
+    });
+
+    create_effect(move |_| {
+        let text = active_editor
+            .get()
+            .and_then(|editor_id| editors.editor(editor_id))
+            .map(|editor| {
+                let doc = editor.doc();
+                doc.buffer.with(|buffer| buffer.to_string())
+            });
+
+        match text {
+            Some(text) => {
+                let config = config.get();
+                // Match the editor background this preview sits on, rather
+                // than the panel foreground `parse_markdown` defaults to.
+                content.set(parse_markdown_with_color(
+                    &text,
+                    1.8,
+                    &config,
+                    config.color(LapceColor::EDITOR_FOREGROUND),
+                ));
+            }
+            None => content.set(Vec::new()),
+        }
+    });
+
+    scroll(
+        dyn_stack(
+            move || {
+                // Wait for the first resize before laying anything out: at width
+                // zero the text would briefly wrap one glyph per line and blow
+                // the pane up vertically.
+                if text_width.get() <= 0.0 {
+                    Vec::new()
+                } else {
+                    content.get()
+                }
+            },
+            move |_| id.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            move |content| match content {
+                MarkdownContent::Text(text_layout) => container(
+                    rich_text(move || text_layout.clone())
+                        .style(move |s| s.max_width(text_width.get() as f32)),
+                )
+                .style(|s| s.max_width_full()),
+                MarkdownContent::Image { .. } => container(empty()),
+                MarkdownContent::Separator => container(empty().style(move |s| {
+                    s.width_full()
+                        .margin_vert(5.0)
+                        .height(1.0)
+                        .background(config.get().color(LapceColor::LAPCE_BORDER))
+                })),
+            },
+        )
+        .style(|s| s.flex_col().padding_horiz(10.0).padding_vert(5.0)),
+    )
+    .on_resize(move |rect| {
+        let width = (rect.width() - 20.0).max(50.0);
+        if text_width.get_untracked() != width {
+            text_width.set(width);
+        }
+    })
+    .style(|s| s.size_full().min_width(0.0).min_height(0.0))
+    .debug_name("Markdown Preview")
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DragOverPosition {
     Top,
@@ -1439,6 +1704,20 @@ fn editor_tab(
     let internal_command = main_split.common.internal_command;
     let tab_size = create_rw_signal(Size::ZERO);
     let drag_over: RwSignal<Option<DragOverPosition>> = create_rw_signal(None);
+    // Whether this pane shows the markdown preview instead of the raw editor.
+    let preview = editor_tab.with_untracked(|editor_tab| editor_tab.preview);
+    // Whether the pane's active tab is an editor document. Non-editor tabs
+    // (settings, diff, plugin) have their own view and cannot be previewed.
+    let pane_has_editor = create_memo(move |_| {
+        editor_tab.with(|editor_tab| {
+            editor_tab
+                .children
+                .get(editor_tab.active)
+                .is_some_and(|(_, _, child)| {
+                    matches!(child, EditorTabChild::Editor(_))
+                })
+        })
+    });
     // Thin bar marking which pane is active: #90a959 for the active pane, gray
     // for the inactive one.
     let active_bar = empty().style(move |s| {
@@ -1458,13 +1737,26 @@ fn editor_tab(
             editor_tab,
             dragging,
         ),
+        pane_preview_toggle(preview, pane_has_editor, config),
         stack((
-            editor_tab_content(
-                window_tab_data.clone(),
-                plugin.clone(),
-                active_editor_tab,
-                editor_tab,
-            ),
+            dyn_container(move || preview.get() && pane_has_editor.get(), {
+                let window_tab_data = window_tab_data.clone();
+                let plugin = plugin.clone();
+                move |preview_on| {
+                    if preview_on {
+                        markdown_preview_view(window_tab_data.clone(), editor_tab)
+                    } else {
+                        editor_tab_content(
+                            window_tab_data.clone(),
+                            plugin.clone(),
+                            active_editor_tab,
+                            editor_tab,
+                        )
+                        .into_any()
+                    }
+                }
+            })
+            .style(|s| s.size_full().min_width(0.0).min_height(0.0)),
             empty()
                 .style(move |s| {
                     let pos = drag_over.get();
@@ -1615,7 +1907,16 @@ fn editor_tab(
                 }),
         ))
         .debug_name("Editor Content and Drag Over")
-        .style(|s| s.size_full()),
+        .style(|s| {
+            // Take the leftover height instead of a full 100%, and refuse to be
+            // pushed around by the content's intrinsic size, so switching a pane
+            // to the preview cannot squash the header/toggle rows above it.
+            s.flex_grow(1.0_f32)
+                .flex_basis(0.0)
+                .width_full()
+                .min_width(0.0)
+                .min_height(0.0)
+        }),
     ))
     .on_event_cont(EventListener::PointerDown, move |_| {
         if focus.get_untracked() != Focus::Workbench {
@@ -2011,7 +2312,16 @@ fn split_list(
                         }
                     }
                 })
-                .style(move |s| s.flex_grow(split_size.get() as f32).flex_basis(0.0))
+                .style(move |s| {
+                    // `min_size` must be zeroed: with the default `auto` a pane
+                    // whose content has a large intrinsic size (e.g. a markdown
+                    // preview with a long token) would grow past its share and
+                    // rebalance the split.
+                    s.flex_grow(split_size.get() as f32)
+                        .flex_basis(0.0)
+                        .min_width(0.0)
+                        .min_height(0.0)
+                })
         }
     };
     container(

@@ -1,5 +1,6 @@
-use floem::text::{
-    Attrs, AttrsList, FamilyOwned, LineHeightValue, Style, TextLayout, Weight,
+use floem::{
+    peniko::Color,
+    text::{Attrs, AttrsList, FamilyOwned, LineHeightValue, Style, TextLayout, Weight},
 };
 use lapce_core::{language::LapceLanguage, syntax::Syntax};
 use lapce_xi_rope::Rope;
@@ -21,6 +22,25 @@ pub fn parse_markdown(
     line_height: f64,
     config: &LapceConfig,
 ) -> Vec<MarkdownContent> {
+    parse_markdown_with_color(
+        text,
+        line_height,
+        config,
+        config.color(LapceColor::PANEL_FOREGROUND),
+    )
+}
+
+/// Like [`parse_markdown`], but with an explicit base text colour.
+///
+/// The editor's markdown preview uses this so that the rendered text contrasts
+/// with the editor background rather than the (possibly much lighter or darker)
+/// panel background.
+pub fn parse_markdown_with_color(
+    text: &str,
+    line_height: f64,
+    config: &LapceConfig,
+    color: Color,
+) -> Vec<MarkdownContent> {
     let mut res = Vec::new();
 
     let mut current_text = String::new();
@@ -28,7 +48,7 @@ pub fn parse_markdown(
         FamilyOwned::parse_list(&config.editor.font_family).collect();
 
     let default_attrs = Attrs::new()
-        .color(config.color(LapceColor::PANEL_FOREGROUND))
+        .color(color)
         .font_size(config.ui.font_size() as f32)
         .line_height(LineHeightValue::Normal(line_height as f32));
     let mut attr_list = AttrsList::new(default_attrs.clone());

@@ -41,6 +41,8 @@ pub mod tracing;
 pub mod update;
 pub mod wave;
 pub mod web_link;
+#[cfg(target_os = "linux")]
+pub mod webkit_preview;
 pub mod window;
 pub mod window_tab;
 pub mod workspace;

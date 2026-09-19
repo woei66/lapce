@@ -41,6 +41,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         bash clang lld llvm file cmake make perl pkg-config curl git ca-certificates \
         libxkbcommon-x11-dev libvulkan-dev libwayland-dev xorg-dev \
         libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev \
+        libwebkit2gtk-4.1-dev \
         libssl-dev zlib1g-dev libzstd-dev libfontconfig1-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -97,6 +98,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get install -y --no-install-recommends \
         ca-certificates fontconfig fonts-dejavu-core zlib1g \
         libgtk-3-0 libvulkan1 libgl1 libegl1 \
+        libwebkit2gtk-4.1-0 \
         mesa-vulkan-drivers libgl1-mesa-dri \
         libxkbcommon0 libxkbcommon-x11-0 \
         libwayland-client0 libwayland-cursor0 libwayland-egl1 \

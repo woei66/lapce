@@ -110,6 +110,7 @@ impl EditorTabInfo {
                 window_origin: Point::ZERO,
                 locations: cx.create_rw_signal(im::Vector::new()),
                 current_location: cx.create_rw_signal(0),
+                preview: cx.create_rw_signal(false),
             };
             cx.create_rw_signal(editor_tab_data)
         };
@@ -413,6 +414,9 @@ pub struct EditorTabData {
     pub layout_rect: Rect,
     pub locations: RwSignal<im::Vector<EditorLocation>>,
     pub current_location: RwSignal<usize>,
+    /// Whether this pane renders its active document as a markdown preview
+    /// instead of showing the raw editor. Each pane toggles independently.
+    pub preview: RwSignal<bool>,
 }
 
 impl EditorTabData {

@@ -883,6 +883,7 @@ impl MainSplitData {
                 layout_rect: Rect::ZERO,
                 locations: cx.create_rw_signal(im::Vector::new()),
                 current_location: cx.create_rw_signal(0),
+                preview: cx.create_rw_signal(false),
             };
             cx.create_rw_signal(editor_tab)
         };
@@ -1724,6 +1725,7 @@ impl MainSplitData {
                 locations: cx.create_rw_signal(editor_tab.locations.get_untracked()),
                 current_location: cx
                     .create_rw_signal(editor_tab.current_location.get_untracked()),
+                preview: cx.create_rw_signal(false),
             };
             cx.create_rw_signal(editor_tab)
         };
@@ -2111,9 +2113,12 @@ impl MainSplitData {
         });
 
         let left_tab_id = match state {
-            // A restored layout already has both panes: leave it untouched so
-            // that the files which were open in each pane come back.
-            LayoutState::Ready => return,
+            // A restored layout already has both panes: keep the files that
+            // were open, but start with the default preview modes.
+            LayoutState::Ready => {
+                self.apply_default_preview_modes();
+                return;
+            }
             LayoutState::SinglePane(editor_tab_id) => editor_tab_id,
             LayoutState::Empty => {
                 // Fresh workspace: create the first editor tab with an empty
@@ -2162,6 +2167,44 @@ impl MainSplitData {
         // workspace), so files passed on the command line open there.
         self.active_editor_tab
             .set(previous_active.or(Some(left_tab_id)));
+
+        self.apply_default_preview_modes();
+    }
+
+    /// Default the two root panes to the view that suits them: the left pane
+    /// starts in markdown preview, the right pane in the raw editor. Each pane
+    /// can still be toggled independently afterwards.
+    pub fn apply_default_preview_modes(&self) {
+        let Some(root_split) = self
+            .splits
+            .with_untracked(|splits| splits.get(&self.root_split).cloned())
+        else {
+            return;
+        };
+        let panes = root_split.with_untracked(|split| {
+            // `Vertical` is the left/right row layout.
+            if split.direction != SplitDirection::Vertical {
+                return Vec::new();
+            }
+            split
+                .children
+                .iter()
+                .filter_map(|(_, content)| match content {
+                    SplitContent::EditorTab(id) => Some(*id),
+                    SplitContent::Split(_) => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        for (index, editor_tab_id) in panes.into_iter().enumerate() {
+            let Some(editor_tab) = self
+                .editor_tabs
+                .with_untracked(|tabs| tabs.get(&editor_tab_id).copied())
+            else {
+                continue;
+            };
+            let preview = editor_tab.with_untracked(|tab| tab.preview);
+            preview.set(index == 0);
+        }
     }
 
     /// The editor pane shown on the given side of the two pane layout.
@@ -2215,11 +2258,6 @@ impl MainSplitData {
         child_index: usize,
         child: &EditorTabChild,
     ) {
-        // Keep the source tab consistent even when we cannot retarget.
-        source_tab_signal.update(|editor_tab| {
-            editor_tab.active = child_index;
-        });
-
         let path = match child {
             EditorTabChild::Editor(editor_id) => {
                 self.editors.editor_untracked(*editor_id).and_then(|editor| {
@@ -2233,9 +2271,24 @@ impl MainSplitData {
         };
 
         let Some(path) = path else {
+            // Non-file children (scratch buffers, settings, ...) cannot be
+            // reopened elsewhere, so show and focus the pane they live in.
+            source_tab_signal.update(|editor_tab| {
+                editor_tab.active = child_index;
+            });
             self.active_editor_tab.set(Some(source_tab));
             return;
         };
+
+        // The two panes are independent. Only touch the source pane when the
+        // clicked entry already lives in the pane it is being loaded into
+        // (then it is just being focused); a file loaded into the *other* pane
+        // must not change what this one shows.
+        if self.side_tab_id(side) == Some(source_tab) {
+            source_tab_signal.update(|editor_tab| {
+                editor_tab.active = child_index;
+            });
+        }
 
         self.open_path_in_side(side, path);
     }
@@ -3165,6 +3218,7 @@ impl MainSplitData {
                 layout_rect: Rect::ZERO,
                 locations: cx.create_rw_signal(im::Vector::new()),
                 current_location: cx.create_rw_signal(0),
+                preview: cx.create_rw_signal(false),
             };
             self.editor_tabs.update(|editor_tabs| {
                 editor_tabs.insert(
@@ -3233,6 +3287,7 @@ impl MainSplitData {
                     layout_rect: Rect::ZERO,
                     locations: cx.create_rw_signal(im::Vector::new()),
                     current_location: cx.create_rw_signal(0),
+                    preview: cx.create_rw_signal(false),
                 }
             };
             self.editor_tabs.update(|editor_tabs| {
